@@ -1,0 +1,3 @@
+  aiohttp>=3.9.5
+  flet==0.26.0
+  pillow==10.4.0
