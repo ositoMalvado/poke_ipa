@@ -12,6 +12,7 @@ dependencies = [
   "aiohttp>=3.11.11",
   "async-timeout>=5.0.1",
   "flet==0.26.0",
+  "pillow==10.4.0",
 ]
 
 [tool.flet]

@@ -34,7 +34,7 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ env.PYTHON_VERSION }}
-        
+
     - name: Install Python Dependencies
       run: |
         python -m pip install --upgrade pip
@@ -47,9 +47,10 @@ jobs:
 
     - name: Flet Build IPA
       run: |
-        cd /pokedex/src/
         flutter config --no-analytics
         flet build ipa --verbose --build-number=$BUILD_NUMBER --build-version=$BUILD_VERSION
+      working-directory: pokedex/src
+
 
     - name: Upload IPA Artifact
       uses: actions/upload-artifact@v4.3.4  # https://github.com/marketplace/actions/upload-a-build-artifact
