@@ -4,10 +4,8 @@ import asyncio
 from pathlib import Path
 from typing import Union, Optional, Dict, Any
 import aiohttp
-import aiofiles
 from PIL import Image
 from io import BytesIO
-from async_timeout import timeout
 
 class AsyncPokeAPI:
     def __init__(self, max_concurrent_requests: int = 10):
@@ -21,7 +19,6 @@ class AsyncPokeAPI:
         self._session = None
         self._session_lock = asyncio.Lock()
 
-        # Crear directorios de caché
         self.image_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -43,38 +40,39 @@ class AsyncPokeAPI:
         return self.image_dir / f"{pokemon_id}.png"
 
     async def _get_lock(self, key: str):
-        """Obtener lock para operaciones concurrentes"""
         if key not in self._locks:
             self._locks[key] = asyncio.Lock()
         return self._locks[key]
 
     async def _fetch_json(self, url: str) -> Dict[str, Any]:
         await self.ensure_session()
-        async with self._semaphore, timeout(30):
+        async with self._semaphore:
             async with self._session.get(url) as response:
                 response.raise_for_status()
                 return await response.json()
 
     async def _get_resource_data(self, resource: str, identifier: Union[int, str]) -> Dict:
-        """Obtener datos de la API con caché y lock"""
         cache_path = self._get_cache_path(resource, identifier)
         lock = await self._get_lock(f"data_{resource}_{identifier}")
 
         async with lock:
-            # Intentar cargar desde caché
-            if cache_path.exists():
-                async with aiofiles.open(cache_path, 'r', encoding='utf-8') as f:
-                    return json.loads(await f.read())
+            # Leer de caché con operaciones nativas asincrónicas
+            if await asyncio.to_thread(cache_path.exists):
+                content = await asyncio.to_thread(cache_path.read_text, encoding='utf-8')
+                return json.loads(content)
 
-            # Obtener de la API
+            # Obtener datos de la API
             url = f"{self.base_url}/{resource}/{identifier}"
             data = await self._fetch_json(url)
 
-            # Guardar en caché usando ID oficial
+            # Guardar en caché
             if 'id' in data:
                 final_cache_path = self._get_cache_path(resource, data['id'])
-                async with aiofiles.open(final_cache_path, 'w', encoding='utf-8') as f:
-                    await f.write(json.dumps(data, ensure_ascii=False, indent=2))
+                await asyncio.to_thread(
+                    final_cache_path.write_text,
+                    json.dumps(data, ensure_ascii=False, indent=2),
+                    encoding='utf-8'
+                )
 
             return data
 
@@ -82,23 +80,19 @@ class AsyncPokeAPI:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
                 headers={"User-Agent": "PokeAPI/2.0"},
-                timeout=aiohttp.ClientTimeout(total=15)
+                timeout=aiohttp.ClientTimeout(total=30)
             )
 
     async def close(self):
-        """Cierra la sesión explícitamente"""
         async with self._session_lock:
             if self._session:
                 await self._session.close()
                 self._session = None
 
-
     async def get_pokemon(self, identifier: Union[int, str]) -> Dict:
-        """Obtener datos de un Pokémon de forma asíncrona"""
         return await self._get_resource_data('pokemon', identifier)
 
     async def get_image(self, identifier: Union[int, str]) -> Image.Image:
-        """Obtener imagen con caché y manejo de errores"""
         try:
             data = await self.get_pokemon(identifier)
             pokemon_id = data['id']
@@ -106,11 +100,12 @@ class AsyncPokeAPI:
             lock = await self._get_lock(f"image_{pokemon_id}")
 
             async with lock:
-                if image_path.exists():
+                # Verificar imagen en caché
+                if await asyncio.to_thread(image_path.exists):
                     try:
                         return Image.open(image_path)
                     except (IOError, Image.UnidentifiedImageError):
-                        image_path.unlink(missing_ok=True)
+                        await asyncio.to_thread(image_path.unlink, missing_ok=True)
 
                 # Descargar imagen
                 image_url = data['sprites']['other']['official-artwork']['front_default']
@@ -118,42 +113,36 @@ class AsyncPokeAPI:
                     response.raise_for_status()
                     image_data = await response.read()
 
-                # Guardar usando temp file primero
+                # Guardar temporal y validar
                 temp_path = image_path.with_suffix('.tmp')
-                async with aiofiles.open(temp_path, 'wb') as f:
-                    await f.write(image_data)
+                await asyncio.to_thread(temp_path.write_bytes, image_data)
                 
-                # Validar imagen antes de mover
                 try:
                     image = Image.open(BytesIO(image_data))
                     image.verify()
                 except (IOError, Image.UnidentifiedImageError) as e:
-                    temp_path.unlink(missing_ok=True)
+                    await asyncio.to_thread(temp_path.unlink, missing_ok=True)
                     raise ValueError(f"Invalid image data: {e}") from e
 
-                temp_path.rename(image_path)
+                # Mover a ubicación final
+                await asyncio.to_thread(os.replace, temp_path, image_path)
                 return Image.open(BytesIO(image_data))
+                
         except aiohttp.ClientError as e:
-            await asyncio.sleep(1)  # Retry delay
-            return await self.get_image(identifier)  # Simple retry
-
+            await asyncio.sleep(1)
+            return await self.get_image(identifier)
 
     async def get_all_types(self) -> Dict:
-        """Obtener todos los tipos de Pokémon"""
         return await self._get_resource_data('type', '')
 
     async def get_ability(self, identifier: Union[int, str]) -> Dict:
-        """Obtener información de habilidad"""
         return await self._get_resource_data('ability', identifier)
 
     async def get_move(self, identifier: Union[int, str]) -> Dict:
-        """Obtener información de movimiento"""
         return await self._get_resource_data('move', identifier)
 
-# Ejemplo de uso
 async def main():
     async with AsyncPokeAPI() as api:
-        # Obtener datos en paralelo
         tasks = [
             api.get_pokemon(25),
             api.get_image(25),
