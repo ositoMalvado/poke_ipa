@@ -2,7 +2,10 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+pokedex/assets/poke_cache/
+.gitattributes
+.python-version
+README.md
 # C extensions
 *.so
 

@@ -9,21 +9,16 @@ class PokeImage(ft.Container):
         await self.api.get_pokemon(index)
         await self.api.get_image(index)
 
-    def load_near_pokemons(self):
+    async def load_near_pokemons(self):
         tasks = []
         current_index = self.index
-        max_index = self.max_index  # Asegúrate de que max_index es 649
+        max_index = self.max_index
 
-        # Generar índices desde current -5 hasta current +5 (11 índices en total)
-        for i in range(
-            current_index - 5, current_index + 6
-        ):  # +6 porque range es exclusivo al final
-            # Ajustar cada índice usando módulo para que esté entre 1 y max_index
+        for i in range(current_index - 5, current_index + 6):
             adjusted_i = (i - 1) % max_index + 1
             tasks.append(self.handle_get(adjusted_i))
 
-        # Ejecutar todas las tareas asincrónicas
-        asyncio.gather(*tasks)
+        await asyncio.gather(*tasks)
 
     async def set_pokemon(self, index=1):
         self.ring.visible = True
@@ -34,7 +29,7 @@ class PokeImage(ft.Container):
         self.ring.visible = False
         self.ring.update()
         self.index = index
-        self.load_near_pokemons()
+        await self.load_near_pokemons()  # Añadir await
         self.tf_number.value = str(index)
         self.tf_number.update()
 
@@ -42,11 +37,15 @@ class PokeImage(ft.Container):
         if self.api:
             await self.api.close()
 
+
     def did_mount(self):
         self.api = AsyncPokeAPI()
-
-        self.page.run_task(self.api.ensure_session)
-        self.page.run_task(self.set_pokemon, self.index)
+        
+        async def initialize():
+            await self.api.ensure_session()
+            await self.set_pokemon(self.index)
+        
+        self.page.run_task(initialize)
         return super().did_mount()
 
     def nav_button(self, e):
@@ -189,10 +188,13 @@ class PokeImage(ft.Container):
 async def main(page: ft.Page):
 
     page.title = "Pokedex"
-    page.window.width = 600
-    page.window.height = 600
+    # page.window.width = 600
+    # page.window.height = 600
 
-    page.add(PokeImage(1))
+    page.add(ft.SafeArea(
+        expand=True,
+        content=PokeImage(1)
+    ))
 
 
 ft.app(main, view=ft.AppView.WEB_BROWSER, assets_dir="assets")
