@@ -29,7 +29,7 @@ company = "ositoMalvado"
 copyright = "Copyright (C) 2025 by ositoMalvado"
 
 [tool.flet.app]
-path = ""
+path = "src"
 
 [tool.uv]
 dev-dependencies = [
